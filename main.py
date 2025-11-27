@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Response, Depends
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from authx import AuthX, AuthXConfig
+from authx import AuthX, AuthXConfig, RequestToken
 from sqlalchemy import select
 from dotenv import dotenv_values
 
@@ -10,7 +11,20 @@ from schemas import UserLoginSchema
 
 
 app = FastAPI()
+
 tokens_and_keys = dotenv_values(".env")
+
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 config = AuthXConfig()
 config.JWT_SECRET_KEY = tokens_and_keys['SECRET_KEY']
@@ -34,13 +48,15 @@ async def login(
     if creds.password != user.password:
         raise HTTPException(status_code=401, detail="incorrect username or password")
     token = security.create_access_token(uid=str(user.id))
-    response.set_cookie(config.JWT_ACCESS_COOKIE_NAME, token)
+    response.set_cookie(config.JWT_ACCESS_COOKIE_NAME, token, max_age=28800)
 
     return {"access_token": token}
 
-@app.post("/protected", dependencies=[Depends(security.access_token_required)])
-def protected():
-    ...
+
+@app.get("/check-auth")
+async def check_auth(user_id: str = Depends(security.access_token_required)):
+    return {"status": "ok", "user_id": user_id}
+
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", reload=True)
+    uvicorn.run("main:app", reload=True, port=8000)
