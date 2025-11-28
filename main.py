@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Response, Depends, UploadFile, File,
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from authx import AuthX, AuthXConfig
-from sqlalchemy import select, insert
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import dotenv_values
 import base64
@@ -15,6 +15,8 @@ from scipy.io import loadmat
 from postgres_db import get_session
 from models import User, patients
 from schemas import UserLoginSchema
+
+import os
 
 
 app = FastAPI()
@@ -79,39 +81,40 @@ async def upload_ecg(
 
     raw_bytes = await file.read()
 
-    # --- 2. Сохраняем во временный .mat файл
+    #Сохраняем во временный .mat файл
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mat") as temp_raw:
         temp_raw.write(raw_bytes)
         temp_raw_path = temp_raw.name
 
-    # --- 3. Загружаем mat-данные
+    #Загружаем mat-данные
     try:
         mat_data = loadmat(temp_raw_path)
     except Exception:
         raise HTTPException(status_code=400, detail="Ошибка чтения MAT файла")
 
-    # --- 4. Проверяем ключ "data"
+    #Проверяем ключ "data"
     if "data" not in mat_data:
         raise HTTPException(status_code=400, detail="MAT файл не содержит ключ 'data'")
 
-    ecg_signal = mat_data["data"]  # <- ваше поле
+    ecg_signal = mat_data["data"][0:12]
 
-    # --- 5. Генерация PNG через ecg_plot
+    #PNG через ecg_plot
     with tempfile.TemporaryDirectory() as temp_dir:
         png_name = "ecg_output"
         png_path = f"{temp_dir}/{png_name}.png"
 
         try:
-            ecg_plot.plot(ecg_signal, sample_rate=500, title = 'ECG 12')  # при необходимости заменить 500 на реальную частоту
+            ecg_plot.plot(ecg_signal, sample_rate=500, title = 'ECG 12')
             ecg_plot.save_as_png(png_name, path=temp_dir + "/")
+#            ecg_plot.save_as_png("ecg_output", path=os.getcwd() + "/") # тестирование сохранения пнг, удалить
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Ошибка построения графика: {e}")
 
-        # --- 6. Читаем PNG в память
+        #Читаем PNG в память
         with open(png_path, "rb") as img_file:
             png_bytes = img_file.read()
 
-    # --- 7. Сохраняем в базу PostgreSQL
+    #Сохраняем в бд
     stmt = patients.insert().values(
         doctor_id=doctor_id,
         last_name=last_name,
@@ -126,7 +129,7 @@ async def upload_ecg(
     await session.execute(stmt)
     await session.commit()
 
-    # --- 8. Отправляем PNG на фронт
+    # Отправляем PNG на фронт
     return {
         "status": "ok",
         "image_png": base64.b64encode(png_bytes).decode("utf-8")
