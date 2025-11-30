@@ -3,8 +3,8 @@ from datetime import date
 from fastapi import FastAPI, HTTPException, Response, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from authx import AuthX, AuthXConfig
-from sqlalchemy import select
+from authx import AuthX, AuthXConfig, TokenPayload
+from sqlalchemy import select, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import dotenv_values
 import base64
@@ -13,8 +13,8 @@ import ecg_plot
 from scipy.io import loadmat
 
 from postgres_db import get_session
-from models import User, patients
-from schemas import UserLoginSchema
+from models import User, Patients
+from schemas import UserLoginSchema, PatientHistoryItem, UserProfileSchema
 
 import os
 
@@ -61,6 +61,11 @@ async def login(
     response.set_cookie(config.JWT_ACCESS_COOKIE_NAME, token, max_age=288000)
 
     return {"access_token": token}
+
+@app.post("/logout")
+async def logout(response: Response):
+    response.delete_cookie("my_access_token")
+    return {"status": "logged_out"}
 
 
 @app.get("/check-auth")
@@ -115,7 +120,7 @@ async def upload_ecg(
             png_bytes = img_file.read()
 
     #Сохраняем в бд
-    stmt = patients.insert().values(
+    stmt = insert(Patients).values(
         doctor_id=doctor_id,
         last_name=last_name,
         first_name=first_name,
@@ -123,7 +128,7 @@ async def upload_ecg(
         exam_date=exam_date,
         raw_file=raw_bytes,
         image_png=png_bytes,
-        description="test description"
+        description="test description",
     )
 
     await session.execute(stmt)
@@ -132,8 +137,50 @@ async def upload_ecg(
     # Отправляем PNG на фронт
     return {
         "status": "ok",
-        "image_png": base64.b64encode(png_bytes).decode("utf-8")
+        "image_base64": base64.b64encode(png_bytes).decode("utf-8")
     }
+
+
+@app.get("/history", response_model=list[PatientHistoryItem])
+async def history(
+        q: str | None = None,
+        token_payload: TokenPayload = Depends(security.access_token_required),
+        session=Depends(get_session),
+):
+    doctor_id = int(token_payload.sub)
+
+    query = select(Patients).where(Patients.doctor_id == doctor_id)
+
+    if q:
+        q = f"%{q.lower()}%"
+        query = query.where(
+            (Patients.last_name.ilike(q)) |
+            (Patients.first_name.ilike(q)) |
+            (Patients.middle_name.ilike(q)) |
+            (Patients.file_name.ilike(q))
+        )
+
+    result = await session.execute(query)
+    rows = result.scalars().all()
+
+    return rows
+
+
+@app.get("/profile", response_model=UserProfileSchema)
+async def get_profile(
+        token_payload: TokenPayload = Depends(security.access_token_required),
+        session=Depends(get_session)
+):
+    user_id = int(token_payload.sub)
+
+    query = select(User).where(User.id == user_id)
+    result = await session.execute(query)
+    user = result.scalar()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
 
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True, port=8000)

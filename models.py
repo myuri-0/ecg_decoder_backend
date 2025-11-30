@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Table, Date, LargeBinary, MetaData, Text
+from sqlalchemy import Column, Integer, String, Date, LargeBinary, MetaData, Text, ForeignKey
 from postgres_db import Base
 
 
@@ -8,20 +8,23 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String, unique=True, nullable=False)
     password = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    first_name = Column(String, nullable=False)
+    middle_name = Column(String, nullable=True)
 
 
 metadata = MetaData()
 
-patients = Table(
-    "patients",
-    metadata,
-    Column("id", Integer, primary_key=True),
-    Column("doctor_id", Integer, nullable=False),
-    Column("last_name", String(100), nullable=False),
-    Column("first_name", String(100), nullable=False),
-    Column("middle_name", String(100)),
-    Column("exam_date", Date, nullable=False),
-    Column("raw_file", LargeBinary),
-    Column("image_png", LargeBinary),
-    Column("description", Text)
-)
+class Patients(Base):
+    __tablename__ = "patients"
+
+    id = Column(Integer, primary_key=True)
+    doctor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    last_name = Column(String(100), nullable=False)
+    first_name = Column(String(100), nullable=False)
+    middle_name = Column(String(100))
+    exam_date = Column(Date, nullable=False)
+    raw_file = Column(LargeBinary)
+    image_png = Column(LargeBinary)
+    description = Column(Text)
+    file_name = Column(String(255))
